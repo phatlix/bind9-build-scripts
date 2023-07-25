@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# BUILD DNS SECONDARY / SLAVE SERVER
+# BUILD INTERNAL DNS SECONDARY / SLAVE SERVER
 #
 
 ##########################################################################
@@ -68,8 +68,9 @@ readline-devel xz-devel zlib-devel libmaxminddb-devel
 cd /opt
 wget ${BG}
 gtar -xf bind-*
+BDIR=$(find . -maxdepth 1 -type d -name 'bind*' -exec basename {} ./ ';')
 
-cd /opt/bind-*
+cd /opt/$BDIR
 ./configure \
         --with-libidn2 \
         --with-libxml2 \
