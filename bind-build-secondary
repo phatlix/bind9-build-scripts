@@ -1,0 +1,476 @@
+#!/bin/bash
+#
+# BUILD DNS SECONDARY / SLAVE SERVER
+#
+
+##########################################################################
+# SETUP VARIABLES
+
+# current bind download
+BG="https://downloads.isc.org/isc/bind9/9.18.17/bind-9.18.17.tar.xz"
+
+# you can plug in more or remove NS records from the include/include.ns file
+# server ip
+SRV="10.0.0.2"
+# secondary server ip
+SLV="10.0.0.3"
+# network subnet
+SUB="10.0.0.0/24"
+
+# server name
+SRN="ns1"
+# secondary server name
+SLN="ns2"
+# internal domain
+DMN="internal"
+
+# use whoever your email hoster is or if you run mail servers... then you know what goes here
+# you can plug in more or remove MX records from the include/include.mx file
+# mail server (mx 1)
+MXO="alt1.gmail-smtp-in.l.google.com"
+# mail server (mx 2)
+MXT="alt2.gmail-smtp-in.l.google.com"
+
+##########################################################################
+
+DS=$(date "+%Y%m%d"); # DATE STAMP
+PIN=`echo $SRV | cut -d . -f 4`
+SIN=`echo $SLV | cut -d . -f 4`
+NIN=`echo $SUB | cut -d"." -f1-3`
+set `echo "$SUB" | sed 's/\./ /g'`
+REV=$3.$2.$1
+
+adduser named -r -u 25 -U -M -s /sbin/nologin -d /opt/named -c "BIND9"
+
+mkdir /opt/named &&
+cd /opt/named &&
+mkdir -p dev etc/namedb var/{run,data} &&
+mkdir -p /opt/named/etc/namedb/{include,internal,external,secondary,log} &&
+mkdir -p /opt/named/etc/policy &&
+mknod /opt/named/dev/null c 1 3 &&
+mknod /opt/named/dev/random c 1 8 &&
+chmod 666 /opt/named/dev/{null,random} &&
+cp /etc/localtime /opt/named/etc &&
+chown -R named.named /opt/named
+
+cp /usr/share/crypto-policies/DEFAULT/bind.txt /opt/named/etc/policy
+cd /opt/named/etc/policy
+ln -s bind.txt bind.config
+
+dnf -y install gcc libgcc glibc-devel jemalloc jemalloc-devel \
+json-c-devel keyutils-libs-devel krb5-devel libcap-devel \
+libcom_err-devel libedit-devel libidn2-devel libmaxminddb \
+libnghttp2-devel libselinux-devel libsepol-devel libuv-devel \
+libverto-devel libxcrypt-devel libxml2-devel lmdb-devel \
+ncurses-devel openssl-devel pcre2-devel pcre-devel \
+readline-devel xz-devel zlib-devel libmaxminddb-devel
+
+cd /opt
+wget ${BG}
+gtar -xf bind-*
+
+cd /opt/bind-*
+./configure \
+        --with-libidn2 \
+        --with-libxml2 \
+        --with-json-c \
+        --with-lmdb \
+        --enable-geoip \
+        --with-maxminddb \
+        --with-openssl \
+        --disable-static \
+        --prefix=/usr \
+        --sysconfdir=/etc \
+        --localstatedir=/var \
+        --enable-full-report
+
+make &&
+make install
+
+rndc-confgen -a -b 512
+RKF=$(cat /etc/rndc.key)
+
+cat > /opt/named/etc/named.conf << EOF
+# BIND CUSTOM CONFIG
+
+acl "lan-net" { ${SUB}; };
+
+options {
+
+        directory                "/etc/namedb";
+        dump-file                "/var/data/named.db";         /* rndc dumpdb     */
+        statistics-file          "/var/data/named.stats";      /* rndc stats      */
+        memstatistics-file       "/var/data/mem.stats";        /* writes on exit  */
+        secroots-file            "/var/data/named.secroots";   /* rndc secroots   */
+        recursing-file           "/var/data/named.recursing";  /* rndc recursing  */
+        pid-file                 "/var/run/named.pid";
+        version                  "[secured]";
+
+        listen-on port 53        { 127.0.0.1; ${SLV}; };
+        listen-on-v6             { none; };
+
+        #forwarders              { 9.9.9.9; 1.1.1.1; };
+
+        allow-query              { 127.0.0.1; lan-net; };
+        #querylog                 no;
+
+        managed-keys-directory   "/key";
+        session-keyfile          "/key/session.key";
+        dnssec-validation        auto;
+
+        #disable-empty-zone       ".";
+
+        #include                  "/etc/policy/bind.config";
+
+};
+
+/* https://kb.isc.org/docs/aa-00769 */
+#statistics-channels {
+#     inet 127.0.0.1 port 8080 allow { 127.0.0.1; };
+#};
+
+controls {
+     inet 127.0.0.1 port 953 allow { 127.0.0.1; ${SLV}; } keys { rndc-key; };
+};
+
+${RKF}
+
+logging {
+
+        channel default_debug {
+                file "log/named.run";
+                print-time yes;
+                print-category yes;
+                print-severity yes;
+                severity dynamic;
+ };
+
+        channel my_log {
+                file "log/log";
+                print-time yes;
+                print-category yes;
+                print-severity yes;
+                severity info;
+ };
+
+        channel my_lame {
+                file "log/lame";
+                print-time yes;
+                print-category yes;
+                print-severity yes;
+                severity info;
+ };
+
+        channel my_xfer {
+                file "log/xfer";
+                print-time yes;
+                print-category yes;
+                print-severity yes;
+                severity info;
+ };
+
+        channel my_query {
+                file "log/query";
+                print-time yes;
+                print-category yes;
+                print-severity yes;
+                severity info;
+ };
+
+        channel my_dnssec {
+                file "log/dnssec";
+                print-time yes;
+                print-category yes;
+                print-severity yes;
+                severity info;
+ };
+
+        channel my_ddns {
+                file "log/ddns";
+                print-time yes;
+                print-category yes;
+                print-severity yes;
+                severity info;
+ };
+
+        channel my_client {
+                file "log/client";
+                print-time yes;
+                print-category yes;
+                print-severity yes;
+                severity info;
+ };
+        channel my_auth {
+                file "log/auth";
+                print-time yes;
+                print-category yes;
+                print-severity yes;
+                severity info;
+ };
+
+        category default           { my_log; default_debug; };
+        category general           { my_log; default_debug; };
+        category config            { my_log; default_debug; };
+        category network           { my_log; default_debug; };
+        category zoneload          { my_log; default_debug; };
+        category dispatch          { my_log; default_debug; };
+
+        category queries           { my_query; default_debug; };
+        category query-errors      { my_query; default_debug; };
+
+        category lame-servers      { my_lame; default_debug; };
+        category edns-disabled     { my_lame; default_debug; };
+
+        category notify            { my_xfer; default_debug; };
+        category xfer-in           { my_xfer; default_debug; };
+        category xfer-out          { my_xfer; default_debug; };
+
+        category security          { my_client; default_debug; };
+        category client            { my_client; default_debug; };
+
+        category dnssec            { my_dnssec; default_debug; };
+
+        category update            { my_ddns; default_debug; };
+        category update-security   { my_ddns; default_debug; };
+
+        category resolver          { my_auth; default_debug; };
+        category cname             { my_auth; default_debug; };
+        category delegation-only   { my_auth; default_debug; };
+
+};
+
+view "internal" {
+        match-clients { localhost; ${SLV}; lan-net; };
+        allow-recursion { localhost; ${SLV}; lan-net; };
+        allow-transfer { none; };
+
+        include "internal/named.conf";
+        include "secondary/named.conf";
+};
+
+view "external" {
+        match-clients { any; };
+        allow-recursion { none; };
+
+        include "external/named.conf";
+};
+
+EOF
+
+ln -s /opt/named/etc/named.conf /etc/named.conf
+
+cd /opt/named/etc/namedb/include
+cat > include.soa << EOF
+;
+; SOA Record
+;
+
+\$TTL    3h
+;      *** THERE ARE DOTS ON THE ENDS OF THESE AND NO @ ON THE EMAIL ADDRESS ***
+@               IN      SOA     ${SLN}.${DMN}.  root.${DMN}. (
+                                ${DS}01   ; serial
+                                3h           ; refresh
+                                1h           ; retry
+                                1w           ; expire
+                                1h )         ; minimum
+
+EOF
+
+cat > include.ns << EOF
+;
+; Name Server Record
+;
+
+@       IN      NS      ${SLN}.${DMN}.
+@       IN      NS      ${SRN}.${DMN}.
+
+EOF
+
+cat > include.mx << EOF
+;
+; MX Record
+;
+
+@       IN      MX 10   ${MXO}.
+@       IN      MX 20   ${MXT}.
+
+EOF
+
+cd /opt/named/etc/namedb/internal
+cat > db.localhost << "EOF"
+;
+; LOCALHOST FORWARD ZONE
+;
+
+$include "include/include.soa"
+$include "include/include.ns"
+
+localhost.      IN      A       127.0.0.1
+
+EOF
+
+cat > db.127.0.0 << "EOF"
+;
+; LOCALHOST REVERSE ZONE
+;
+
+$include "include/include.soa"
+$include "include/include.ns"
+
+1       IN      PTR     localhost.
+
+EOF
+
+cat > named.conf << EOF
+ zone "." {
+        type hint;
+        file "internal/db.roots";
+ };
+
+ zone "localhost" {
+        type master;
+        file "internal/db.localhost";
+        notify no;
+ };
+
+zone "0.0.127.in-addr.arpa" {
+        type master;
+        file "internal/db.127.0.0";
+        notify no;
+ };
+
+EOF
+
+cd /opt/named/etc/namedb/secondary
+cat > named.conf << EOF
+;
+; SECONDARY ZONE FILE
+;
+
+zone "${DMN}" {
+        type slave;
+        masters { ${SRV}; };
+        file "secondary/db.${DMN}";
+};
+
+zone "${REV}.in-addr.arpa." {
+        type slave;
+        masters { ${SRV}; };
+        file "secondary/db.${NIN}";
+};
+
+EOF
+
+cd /opt/named/etc/namedb/external
+touch named.conf
+
+cat > /usr/lib/systemd/system/named.service << "EOF"
+[Unit]
+Description=Berkeley Internet Name Domain (DNS)
+Wants=nss-lookup.target
+Before=nss-lookup.target
+After=network.target
+
+[Service]
+Type=forking
+Environment=NAMEDCONF=/etc/named.conf
+EnvironmentFile=-/etc/sysconfig/named
+
+ExecStart=/usr/sbin/named -u named -t /opt/named -c ${NAMEDCONF} $OPTIONS
+ExecReload=/usr/sbin/rndc null > /dev/null 2>&1; then /usr/sbin/rndc reload
+ExecStop=/usr/sbin/rndc stop > /dev/null 2>&1
+
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+
+EOF
+
+cat > /etc/sysconfig/named << "EOF"
+# BIND named process options
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# OPTIONS="whatever"     --  These additional options will be passed to named
+#                            at startup. Don't add -t here, enable proper
+#                            -chroot.service unit file.
+#
+# NAMEDCONF=/etc/named/alternate.conf
+#                        --  Don't use -c to change configuration file.
+#                            Extend systemd named.service instead or use this
+#                            variable.
+#
+# DISABLE_ZONE_CHECKING  --  By default, service file calls named-checkzone
+#                            utility for every zone to ensure all zones are
+#                            valid before named starts. If you set this option
+#                            to 'yes' then service file doesn't perform those
+#                            checks.
+
+# ONLY USE IPV4
+OPTIONS="-4"
+
+EOF
+
+cat > /opt/named/etc/namedb/roots << "EOF"
+#!/bin/bash
+
+# TRY DIG IF WGET FAILS
+# dig @a.root-servers.net . ns > /opt/named/etc/namedb/internal/db.roots
+
+wget --user=ftp --password=ftp ftp://ftp.internic.net/domain/named.cache -O /opt/named/etc/namedb/internal/db.roots
+
+chown named.named /opt/named/etc/namedb/internal/db.roots
+
+exit
+
+EOF
+
+cat > /opt/named/etc/namedb/reload << "EOF"
+#!/bin/bash
+#
+# SCRIPT TO CLEAR LOGS AND RESTART BIND
+# CAN BE USED AFTER MAKING CHANGES. IF 
+# YOU DONT WANT TO CLEAR LOGS AFTER CHANGES
+# THE JUST RUN 'rndc reload' FROM THE CLI.
+#
+
+### WIPE LOGS THEN TOUCH NEW LOG AND DEBUG LOG
+rm -f /opt/named/etc/namedb/log/*
+touch /opt/named/etc/namedb/log/log
+touch /opt/named/etc/namedb/log/named.run
+chown -R named.named /opt/named
+
+### STOP SERVICE
+systemctl stop named
+sleep 2
+
+### START SERVICE AND TAIL DEBUG LOG (ctrl+c to quit tail)
+systemctl start named && tail -f /opt/named/etc/namedb/log/named.run
+
+exit
+
+EOF
+
+cd /opt
+rm -fR bind-*
+
+chmod +x /opt/named/etc/namedb/roots
+chmod +x /opt/named/etc/namedb/reload
+/opt/named/etc/namedb/roots
+
+chown root:named /etc/rndc.key /etc/named.conf
+chmod 640 /etc/rndc.key /etc/named.conf
+chown -R named.named /opt/named
+
+systemctl daemon-reload
+systemctl enable named
+
+cp -a /etc/resolv.conf /etc/resolv.conf.bak
+cat > /etc/resolv.conf << "EOF"
+nameserver 127.0.0.1
+nameserver 1.1.1.1
+#search internal
+EOF
+
+printf "\n\n START SERVICE AFTER VALIDATING INSTALL OR MAKING MODIFICATIONS \n\"
+exit
