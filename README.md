@@ -2,7 +2,7 @@
 
 ### BIND9 Install on Rocky Linux 8.8  
 
-So here are a couple scripts.
+Here are a couple scripts.
 
 I wanted a way to standup a primary DNS server or a quick way to rebuild that server.  But I also wanted a way to standup or rebuild a secondary server without a need to edit my single script each time.  Plus, I find that when I have to edit scripting like that, I am seriously prone to error and will screw something up.  So two build scripts.  
 
