@@ -1,6 +1,9 @@
 # BIND9 Build Scripts
 
-### BIND9 Install on Rocky Linux 8.8  
+### BIND9 Install
+
+Tested and works on:  
+* Rocky Linux 8.9
 
 Here are a couple scripts.
 
